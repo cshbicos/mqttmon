@@ -1,6 +1,8 @@
 # MQTT Monitor
 
-A fullscreen terminal UI for monitoring all topics on a Mosquitto MQTT server in real-time.
+A vibe coded, fullscreen terminal UI for monitoring all topics on a Mosquitto MQTT server in real-time.
+
+Mainly a playing ground for some simple AI experiments with a semi-functional outcome.
 
 ## Features
 
