@@ -11,6 +11,7 @@ Mainly a playing ground for some simple AI experiments with a semi-functional ou
 - Navigate topics with arrow keys and visual selection highlighting
 - Quick publish to existing topics: select with arrow keys and press Enter
 - Publish to new topics with an interactive modal dialog (press `p`)
+- Support for both one-time and persistent (retained) message publishing
 - Displays latest message payload and timestamp for each topic
 - Sorted topic list with automatic scrolling
 - Clean, colorful interface with syntax highlighting
@@ -61,12 +62,14 @@ Custom client ID:
 
 **Publish to Existing Topic (after pressing Enter on selection):**
 - Type to enter the message payload
+- `Ctrl+R` - Toggle retained flag (persistent vs one-time publish)
 - `Enter` - Publish the message
 - `Esc` - Cancel and return to main view
 - `Backspace` - Delete characters
 
 **Publish to New Topic (after pressing 'p'):**
 - `Tab` - Switch between topic and message fields
+- `Ctrl+R` - Toggle retained flag (persistent vs one-time publish)
 - `Enter` - Submit and publish message (or move from topic to message field)
 - `Esc` - Cancel and close dialog
 - `Backspace` - Delete characters
@@ -82,8 +85,11 @@ The monitor:
 5. Navigate topics with arrow keys - the selected topic is highlighted with a `>` indicator
 6. Press Enter on a selected topic to quickly publish a new message to it
 7. Press `p` to publish to any topic (new or existing) via an interactive dialog
-8. Shows status notifications for successful publishes
-9. Automatically handles screen resizing and scrolling for many topics
+8. Toggle retained flag with Ctrl+R:
+   - **One-time publish** (default): Message sent once to current subscribers
+   - **Retained publish**: Broker stores message and sends to new subscribers
+9. Shows status notifications for successful publishes
+10. Automatically handles screen resizing and scrolling for many topics
 
 ## Requirements
 

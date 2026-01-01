@@ -39,6 +39,7 @@ type model struct {
 	editingTopic   bool
 	publishTopic   string
 	publishMessage string
+	publishRetained bool
 	focusedField   int // 0 = topic, 1 = message
 	selectedIndex  int
 	statusMessage  string
@@ -76,17 +77,22 @@ func (m model) executePublish() model {
 		return m
 	}
 
-	token := m.client.Publish(m.publishTopic, 0, false, m.publishMessage)
+	token := m.client.Publish(m.publishTopic, 0, m.publishRetained, m.publishMessage)
 	go func() {
 		token.Wait()
 	}()
 
-	m.statusMessage = fmt.Sprintf("Published to: %s", m.publishTopic)
+	retainedText := ""
+	if m.publishRetained {
+		retainedText = " (retained)"
+	}
+	m.statusMessage = fmt.Sprintf("Published to: %s%s", m.publishTopic, retainedText)
 	m.statusTime = time.Now()
 	m.publishMode = false
 	m.editingTopic = false
 	m.publishTopic = ""
 	m.publishMessage = ""
+	m.publishRetained = false
 	m.focusedField = 0
 
 	return m
@@ -99,6 +105,7 @@ func (m model) handlePublishModeKeys(key string) (model, tea.Cmd) {
 		m.editingTopic = false
 		m.publishTopic = ""
 		m.publishMessage = ""
+		m.publishRetained = false
 		m.focusedField = 0
 		return m, nil
 
@@ -125,6 +132,10 @@ func (m model) handlePublishModeKeys(key string) (model, tea.Cmd) {
 				m.publishMessage = m.publishMessage[:len(m.publishMessage)-1]
 			}
 		}
+		return m, nil
+
+	case "ctrl+r":
+		m.publishRetained = !m.publishRetained
 		return m, nil
 
 	default:
@@ -154,6 +165,7 @@ func (m model) handleMainViewKeys(key string) (model, tea.Cmd) {
 		m.focusedField = 0
 		m.publishTopic = ""
 		m.publishMessage = ""
+		m.publishRetained = false
 		return m, nil
 
 	case "up":
@@ -186,6 +198,7 @@ func (m model) handleMainViewKeys(key string) (model, tea.Cmd) {
 				m.editingTopic = true
 				m.publishTopic = selectedTopic
 				m.publishMessage = ""
+				m.publishRetained = false
 				return m, nil
 			}
 		}
@@ -405,10 +418,20 @@ func (m model) renderPublishDialog(s styles, mainView string) string {
 	}
 
 	publishContent.WriteString("\n\n")
+
+	retainedLabel := "Retained: "
+	retainedStatus := "No"
+	if m.publishRetained {
+		retainedStatus = "Yes"
+	}
+	publishContent.WriteString(s.label.Render(retainedLabel))
+	publishContent.WriteString(s.input.Render(retainedStatus))
+
+	publishContent.WriteString("\n\n")
 	if m.editingTopic {
-		publishContent.WriteString(s.help.Render("Enter: publish | Esc: cancel"))
+		publishContent.WriteString(s.help.Render("Ctrl+R: toggle retained | Enter: publish | Esc: cancel"))
 	} else {
-		publishContent.WriteString(s.help.Render("Tab: switch field | Enter: publish | Esc: cancel"))
+		publishContent.WriteString(s.help.Render("Tab: switch | Ctrl+R: toggle retained | Enter: publish | Esc: cancel"))
 	}
 
 	publishBox := s.publishBox.Render(publishContent.String())
