@@ -69,123 +69,140 @@ func waitForMQTTMessage() tea.Cmd {
 	}
 }
 
+func (m model) executePublish() model {
+	if m.publishTopic == "" {
+		m.statusMessage = "Error: Topic cannot be empty"
+		m.statusTime = time.Now()
+		return m
+	}
+
+	token := m.client.Publish(m.publishTopic, 0, false, m.publishMessage)
+	go func() {
+		token.Wait()
+	}()
+
+	m.statusMessage = fmt.Sprintf("Published to: %s", m.publishTopic)
+	m.statusTime = time.Now()
+	m.publishMode = false
+	m.editingTopic = false
+	m.publishTopic = ""
+	m.publishMessage = ""
+	m.focusedField = 0
+
+	return m
+}
+
+func (m model) handlePublishModeKeys(key string) (model, tea.Cmd) {
+	switch key {
+	case "esc":
+		m.publishMode = false
+		m.editingTopic = false
+		m.publishTopic = ""
+		m.publishMessage = ""
+		m.focusedField = 0
+		return m, nil
+
+	case "tab":
+		if m.publishMode {
+			m.focusedField = (m.focusedField + 1) % 2
+		}
+		return m, nil
+
+	case "enter":
+		if m.publishMode && m.focusedField == 0 && m.publishTopic != "" {
+			m.focusedField = 1
+			return m, nil
+		} else if (m.publishMode && m.focusedField == 1) || m.editingTopic {
+			m = m.executePublish()
+			return m, nil
+		}
+
+	case "backspace":
+		if m.publishMode && m.focusedField == 0 && len(m.publishTopic) > 0 {
+			m.publishTopic = m.publishTopic[:len(m.publishTopic)-1]
+		} else if (m.publishMode && m.focusedField == 1) || m.editingTopic {
+			if len(m.publishMessage) > 0 {
+				m.publishMessage = m.publishMessage[:len(m.publishMessage)-1]
+			}
+		}
+		return m, nil
+
+	default:
+		if len(key) == 1 {
+			if m.publishMode && m.focusedField == 0 {
+				m.publishTopic += key
+			} else if (m.publishMode && m.focusedField == 1) || m.editingTopic {
+				m.publishMessage += key
+			}
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m model) handleMainViewKeys(key string) (model, tea.Cmd) {
+	switch key {
+	case "ctrl+c", "q":
+		if m.client != nil && m.client.IsConnected() {
+			m.client.Disconnect(250)
+		}
+		return m, tea.Quit
+
+	case "p":
+		m.publishMode = true
+		m.focusedField = 0
+		m.publishTopic = ""
+		m.publishMessage = ""
+		return m, nil
+
+	case "up":
+		if m.selectedIndex > 0 {
+			m.selectedIndex--
+		}
+		return m, nil
+
+	case "down":
+		m.topicsMutex.RLock()
+		maxIndex := len(m.topics) - 1
+		m.topicsMutex.RUnlock()
+		if m.selectedIndex < maxIndex {
+			m.selectedIndex++
+		}
+		return m, nil
+
+	case "enter":
+		m.topicsMutex.RLock()
+		if len(m.topics) > 0 {
+			sortedTopics := make([]string, 0, len(m.topics))
+			for topic := range m.topics {
+				sortedTopics = append(sortedTopics, topic)
+			}
+			sort.Strings(sortedTopics)
+
+			if m.selectedIndex < len(sortedTopics) {
+				selectedTopic := sortedTopics[m.selectedIndex]
+				m.topicsMutex.RUnlock()
+				m.editingTopic = true
+				m.publishTopic = selectedTopic
+				m.publishMessage = ""
+				return m, nil
+			}
+		}
+		m.topicsMutex.RUnlock()
+		return m, nil
+	}
+
+	return m, nil
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.publishMode || m.editingTopic {
-			switch msg.String() {
-			case "esc":
-				m.publishMode = false
-				m.editingTopic = false
-				m.publishTopic = ""
-				m.publishMessage = ""
-				m.focusedField = 0
-				return m, nil
-
-			case "tab":
-				if m.publishMode {
-					m.focusedField = (m.focusedField + 1) % 2
-				}
-				return m, nil
-
-			case "enter":
-				if m.publishMode && m.focusedField == 0 && m.publishTopic != "" {
-					m.focusedField = 1
-					return m, nil
-				} else if (m.publishMode && m.focusedField == 1) || m.editingTopic {
-					if m.publishTopic == "" {
-						m.statusMessage = "Error: Topic cannot be empty"
-						m.statusTime = time.Now()
-						return m, nil
-					}
-
-					token := m.client.Publish(m.publishTopic, 0, false, m.publishMessage)
-					go func() {
-						token.Wait()
-					}()
-
-					m.statusMessage = fmt.Sprintf("Published to: %s", m.publishTopic)
-					m.statusTime = time.Now()
-					m.publishMode = false
-					m.editingTopic = false
-					m.publishTopic = ""
-					m.publishMessage = ""
-					m.focusedField = 0
-					return m, nil
-				}
-
-			case "backspace":
-				if m.publishMode && m.focusedField == 0 && len(m.publishTopic) > 0 {
-					m.publishTopic = m.publishTopic[:len(m.publishTopic)-1]
-				} else if (m.publishMode && m.focusedField == 1) || m.editingTopic {
-					if len(m.publishMessage) > 0 {
-						m.publishMessage = m.publishMessage[:len(m.publishMessage)-1]
-					}
-				}
-				return m, nil
-
-			default:
-				if len(msg.String()) == 1 {
-					if m.publishMode && m.focusedField == 0 {
-						m.publishTopic += msg.String()
-					} else if (m.publishMode && m.focusedField == 1) || m.editingTopic {
-						m.publishMessage += msg.String()
-					}
-				}
-				return m, nil
-			}
-		} else {
-			switch msg.String() {
-			case "ctrl+c", "q":
-				if m.client != nil && m.client.IsConnected() {
-					m.client.Disconnect(250)
-				}
-				return m, tea.Quit
-
-			case "p":
-				m.publishMode = true
-				m.focusedField = 0
-				m.publishTopic = ""
-				m.publishMessage = ""
-				return m, nil
-
-			case "up":
-				if m.selectedIndex > 0 {
-					m.selectedIndex--
-				}
-				return m, nil
-
-			case "down":
-				m.topicsMutex.RLock()
-				maxIndex := len(m.topics) - 1
-				m.topicsMutex.RUnlock()
-				if m.selectedIndex < maxIndex {
-					m.selectedIndex++
-				}
-				return m, nil
-
-			case "enter":
-				m.topicsMutex.RLock()
-				if len(m.topics) > 0 {
-					sortedTopics := make([]string, 0, len(m.topics))
-					for topic := range m.topics {
-						sortedTopics = append(sortedTopics, topic)
-					}
-					sort.Strings(sortedTopics)
-
-					if m.selectedIndex < len(sortedTopics) {
-						selectedTopic := sortedTopics[m.selectedIndex]
-						m.topicsMutex.RUnlock()
-						m.editingTopic = true
-						m.publishTopic = selectedTopic
-						m.publishMessage = ""
-						return m, nil
-					}
-				}
-				m.topicsMutex.RUnlock()
-				return m, nil
-			}
+			return m.handlePublishModeKeys(msg.String())
 		}
+		return m.handleMainViewKeys(msg.String())
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -209,211 +226,245 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+type styles struct {
+	header          lipgloss.Style
+	topic           lipgloss.Style
+	selectedTopic   lipgloss.Style
+	timestamp       lipgloss.Style
+	payload         lipgloss.Style
+	selectedPayload lipgloss.Style
+	help            lipgloss.Style
+	status          lipgloss.Style
+	label           lipgloss.Style
+	input           lipgloss.Style
+	focusedInput    lipgloss.Style
+	readOnly        lipgloss.Style
+	publishBox      lipgloss.Style
+}
+
+func getStyles() styles {
+	return styles{
+		header: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("12")).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1),
+		topic: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("10")),
+		selectedTopic: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("11")).
+			Background(lipgloss.Color("236")),
+		timestamp: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("8")),
+		payload: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")),
+		selectedPayload: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("236")),
+		help: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("8")).
+			Italic(true),
+		status: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("10")),
+		label: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("14")).
+			Bold(true),
+		input: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")),
+		focusedInput: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("11")).
+			Background(lipgloss.Color("236")),
+		readOnly: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("8")),
+		publishBox: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("12")).
+			Padding(1, 2).
+			Width(60),
+	}
+}
+
+func (m model) renderTopicsList(s styles) string {
+	var b strings.Builder
+
+	m.topicsMutex.RLock()
+	defer m.topicsMutex.RUnlock()
+
+	if len(m.topics) == 0 {
+		b.WriteString("Waiting for messages...\n")
+		return b.String()
+	}
+
+	sortedTopics := make([]string, 0, len(m.topics))
+	for topic := range m.topics {
+		sortedTopics = append(sortedTopics, topic)
+	}
+	sort.Strings(sortedTopics)
+
+	maxLines := m.height - 5
+	if maxLines < 1 {
+		maxLines = 10
+	}
+
+	displayCount := 0
+	for i, topic := range sortedTopics {
+		if displayCount >= maxLines {
+			remaining := len(m.topics) - displayCount
+			b.WriteString(fmt.Sprintf("\n... and %d more topics", remaining))
+			break
+		}
+
+		msg := m.topics[topic]
+		timeStr := msg.timestamp.Format("15:04:05")
+		isSelected := i == m.selectedIndex
+
+		if isSelected {
+			topicLine := s.selectedTopic.Render("> " + topic)
+			timestampLine := s.timestamp.Render(fmt.Sprintf("[%s]", timeStr))
+			b.WriteString(fmt.Sprintf("%s %s\n", topicLine, timestampLine))
+		} else {
+			topicLine := s.topic.Render(topic)
+			timestampLine := s.timestamp.Render(fmt.Sprintf("[%s]", timeStr))
+			b.WriteString(fmt.Sprintf("  %s %s\n", topicLine, timestampLine))
+		}
+
+		payload := msg.payload
+		maxPayloadLen := m.width - 4
+		if maxPayloadLen < 20 {
+			maxPayloadLen = 20
+		}
+		if len(payload) > maxPayloadLen {
+			payload = payload[:maxPayloadLen-3] + "..."
+		}
+
+		if isSelected {
+			b.WriteString(s.selectedPayload.Render(fmt.Sprintf("  %s\n", payload)))
+		} else {
+			b.WriteString(s.payload.Render(fmt.Sprintf("  %s\n", payload)))
+		}
+
+		b.WriteString("\n")
+		displayCount++
+	}
+
+	return b.String()
+}
+
+func (m model) renderStatusAndHelp(s styles, topicCount int) string {
+	var b strings.Builder
+
+	if m.statusMessage != "" && time.Since(m.statusTime) < 3*time.Second {
+		b.WriteString(s.status.Render(m.statusMessage))
+		b.WriteString(" | ")
+	}
+
+	help := s.help.Render(fmt.Sprintf("Topics: %d | ↑/↓: select | Enter: edit | p: publish new | q: quit", topicCount))
+	b.WriteString(help)
+
+	return b.String()
+}
+
+func (m model) renderPublishDialog(s styles, mainView string) string {
+	var publishContent strings.Builder
+
+	if m.editingTopic {
+		publishContent.WriteString(s.label.Render("Publish to Topic") + "\n\n")
+	} else {
+		publishContent.WriteString(s.label.Render("Publish Message") + "\n\n")
+	}
+
+	topicLabel := "Topic: "
+	topicInput := m.publishTopic
+
+	if m.editingTopic {
+		publishContent.WriteString(s.label.Render(topicLabel))
+		publishContent.WriteString(s.readOnly.Render(topicInput + " (read-only)"))
+	} else {
+		if m.focusedField == 0 {
+			publishContent.WriteString(s.label.Render(topicLabel))
+			publishContent.WriteString(s.focusedInput.Render(topicInput + "▌"))
+		} else {
+			publishContent.WriteString(s.label.Render(topicLabel))
+			publishContent.WriteString(s.input.Render(topicInput))
+		}
+	}
+
+	publishContent.WriteString("\n\n")
+
+	messageLabel := "Message: "
+	messageInput := m.publishMessage
+
+	if m.editingTopic || m.focusedField == 1 {
+		publishContent.WriteString(s.label.Render(messageLabel))
+		publishContent.WriteString(s.focusedInput.Render(messageInput + "▌"))
+	} else {
+		publishContent.WriteString(s.label.Render(messageLabel))
+		publishContent.WriteString(s.input.Render(messageInput))
+	}
+
+	publishContent.WriteString("\n\n")
+	if m.editingTopic {
+		publishContent.WriteString(s.help.Render("Enter: publish | Esc: cancel"))
+	} else {
+		publishContent.WriteString(s.help.Render("Tab: switch field | Enter: publish | Esc: cancel"))
+	}
+
+	publishBox := s.publishBox.Render(publishContent.String())
+
+	lines := strings.Split(mainView, "\n")
+	dialogHeight := 12
+	insertLine := (m.height - dialogHeight) / 2
+	if insertLine < 0 {
+		insertLine = 0
+	}
+	if insertLine >= len(lines) {
+		insertLine = len(lines) - 1
+	}
+
+	var result strings.Builder
+	for i := 0; i < len(lines); i++ {
+		if i == insertLine {
+			result.WriteString(publishBox + "\n")
+		}
+		if i < len(lines) {
+			result.WriteString(lines[i] + "\n")
+		}
+	}
+
+	return result.String()
+}
+
 func (m model) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n", m.err)
 	}
 
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("12")).
-		Background(lipgloss.Color("236")).
-		Padding(0, 1)
-
-	topicStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("10"))
-
-	selectedTopicStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("11")).
-		Background(lipgloss.Color("236"))
-
-	timestampStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("8"))
-
-	payloadStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15"))
-
-	selectedPayloadStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("236"))
-
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("8")).
-		Italic(true)
-
+	s := getStyles()
 	var b strings.Builder
 
-	header := headerStyle.Render(fmt.Sprintf(" MQTT Monitor - %s ", *broker))
+	header := s.header.Render(fmt.Sprintf(" MQTT Monitor - %s ", *broker))
 	b.WriteString(header)
 	b.WriteString("\n\n")
 
-	m.topicsMutex.RLock()
-	topicCount := len(m.topics)
-
-	if topicCount == 0 {
-		b.WriteString("Waiting for messages...\n")
-	} else {
-		sortedTopics := make([]string, 0, topicCount)
-		for topic := range m.topics {
-			sortedTopics = append(sortedTopics, topic)
-		}
-		sort.Strings(sortedTopics)
-
-		maxLines := m.height - 5
-		if maxLines < 1 {
-			maxLines = 10
-		}
-
-		displayCount := 0
-		for i, topic := range sortedTopics {
-			if displayCount >= maxLines {
-				remaining := topicCount - displayCount
-				b.WriteString(fmt.Sprintf("\n... and %d more topics", remaining))
-				break
-			}
-
-			msg := m.topics[topic]
-			timeStr := msg.timestamp.Format("15:04:05")
-
-			isSelected := i == m.selectedIndex
-			var topicLine, payloadLine string
-
-			if isSelected {
-				topicLine = selectedTopicStyle.Render("> " + topic)
-				timestampLine := timestampStyle.Render(fmt.Sprintf("[%s]", timeStr))
-				b.WriteString(fmt.Sprintf("%s %s\n", topicLine, timestampLine))
-			} else {
-				topicLine = topicStyle.Render(topic)
-				timestampLine := timestampStyle.Render(fmt.Sprintf("[%s]", timeStr))
-				b.WriteString(fmt.Sprintf("  %s %s\n", topicLine, timestampLine))
-			}
-
-			payload := msg.payload
-			maxPayloadLen := m.width - 4
-			if maxPayloadLen < 20 {
-				maxPayloadLen = 20
-			}
-			if len(payload) > maxPayloadLen {
-				payload = payload[:maxPayloadLen-3] + "..."
-			}
-
-			if isSelected {
-				payloadLine = selectedPayloadStyle.Render(fmt.Sprintf("  %s\n", payload))
-			} else {
-				payloadLine = payloadStyle.Render(fmt.Sprintf("  %s\n", payload))
-			}
-
-			b.WriteString(payloadLine)
-			b.WriteString("\n")
-
-			displayCount++
-		}
-	}
-	m.topicsMutex.RUnlock()
+	b.WriteString(m.renderTopicsList(s))
 
 	b.WriteString("\n")
 
-	if m.statusMessage != "" && time.Since(m.statusTime) < 3*time.Second {
-		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-		b.WriteString(statusStyle.Render(m.statusMessage))
-		b.WriteString(" | ")
-	}
+	m.topicsMutex.RLock()
+	topicCount := len(m.topics)
+	m.topicsMutex.RUnlock()
 
-	help := helpStyle.Render(fmt.Sprintf("Topics: %d | ↑/↓: select | Enter: edit | p: publish new | q: quit", topicCount))
-	b.WriteString(help)
+	b.WriteString(m.renderStatusAndHelp(s, topicCount))
+
+	mainView := b.String()
 
 	if m.publishMode || m.editingTopic {
-		publishBoxStyle := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("12")).
-			Padding(1, 2).
-			Width(60)
-
-		labelStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("14")).
-			Bold(true)
-
-		inputStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15"))
-
-		focusedInputStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("11")).
-			Background(lipgloss.Color("236"))
-
-		readOnlyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8"))
-
-		var publishContent strings.Builder
-		if m.editingTopic {
-			publishContent.WriteString(labelStyle.Render("Publish to Topic") + "\n\n")
-		} else {
-			publishContent.WriteString(labelStyle.Render("Publish Message") + "\n\n")
-		}
-
-		topicLabel := "Topic: "
-		topicInput := m.publishTopic
-
-		if m.editingTopic {
-			publishContent.WriteString(labelStyle.Render(topicLabel))
-			publishContent.WriteString(readOnlyStyle.Render(topicInput + " (read-only)"))
-		} else {
-			if m.focusedField == 0 {
-				publishContent.WriteString(labelStyle.Render(topicLabel))
-				publishContent.WriteString(focusedInputStyle.Render(topicInput + "▌"))
-			} else {
-				publishContent.WriteString(labelStyle.Render(topicLabel))
-				publishContent.WriteString(inputStyle.Render(topicInput))
-			}
-		}
-
-		publishContent.WriteString("\n\n")
-
-		messageLabel := "Message: "
-		messageInput := m.publishMessage
-
-		if m.editingTopic || m.focusedField == 1 {
-			publishContent.WriteString(labelStyle.Render(messageLabel))
-			publishContent.WriteString(focusedInputStyle.Render(messageInput + "▌"))
-		} else {
-			publishContent.WriteString(labelStyle.Render(messageLabel))
-			publishContent.WriteString(inputStyle.Render(messageInput))
-		}
-
-		publishContent.WriteString("\n\n")
-		if m.editingTopic {
-			publishContent.WriteString(helpStyle.Render("Enter: publish | Esc: cancel"))
-		} else {
-			publishContent.WriteString(helpStyle.Render("Tab: switch field | Enter: publish | Esc: cancel"))
-		}
-
-		publishBox := publishBoxStyle.Render(publishContent.String())
-
-		lines := strings.Split(b.String(), "\n")
-		dialogHeight := 12
-		insertLine := (m.height - dialogHeight) / 2
-		if insertLine < 0 {
-			insertLine = 0
-		}
-		if insertLine >= len(lines) {
-			insertLine = len(lines) - 1
-		}
-
-		var result strings.Builder
-		for i := 0; i < len(lines); i++ {
-			if i == insertLine {
-				result.WriteString(publishBox + "\n")
-			}
-			if i < len(lines) {
-				result.WriteString(lines[i] + "\n")
-			}
-		}
-
-		return result.String()
+		return m.renderPublishDialog(s, mainView)
 	}
 
-	return b.String()
+	return mainView
 }
 
 func main() {
